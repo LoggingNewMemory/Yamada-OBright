@@ -9,15 +9,15 @@
 #include <sys/stat.h>
 #include <android/log.h>
 #include <sys/system_properties.h>
+#include <stdbool.h> 
 
 #define LOG_TAG "OplusBrightFix"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-typedef struct prop_info prop_info;
-extern const prop_info *__system_property_find(const char *name);
-extern void __system_property_read(const prop_info *pi, char *name, char *value);
-extern void __system_property_wait(const prop_info *pi, unsigned int serial, unsigned int *new_serial_ptr, const struct timespec *relative_timeout);
+/* * REMOVED conflicting extern declarations. 
+ * The NDK <sys/system_properties.h> already handles this.
+ */
 
 #define PATH_BRIGHTNESS "/sys/class/leds/lcd-backlight/brightness"
 #define PATH_MAX_BRIGHT "/sys/class/leds/lcd-backlight/max_hw_brightness"
@@ -168,6 +168,7 @@ void* thread_brightness_monitor(void* arg) {
     while (1) {
         __system_property_wait(pi, serial, &serial, NULL);
         
+        // __system_property_read returns int length in NDK
         if (__system_property_read(pi, NULL, value) > 0 && strlen(value) > 0) {
             int new_val = -1;
             
