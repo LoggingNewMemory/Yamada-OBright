@@ -70,11 +70,18 @@ service vendor.yamada.display-adaptor /vendor/bin/hw/$BIN_NAME
     writepid /dev/cpuset/system-background/tasks
 
 on property:sys.boot_completed=1
+    # Change ownership strictly to the system user
+    chown system system /sys/class/leds/lcd-backlight/brightness
+    
+    # Restrict write access to ONLY the owner (system)
+    # 0600 means Read/Write for owner, No access for group/others
+    chmod 0600 /sys/class/leds/lcd-backlight/brightness
+    
+    # Start service
     start vendor.yamada.display-adaptor
 EOF
 
 echo "✅ Created RC file: $ETC_DIR/$RC_NAME"
-
 # 4. Finalize
 echo "--- Done ---"
 echo "Files are ready in '$OUT_DIR/vendor/'"
