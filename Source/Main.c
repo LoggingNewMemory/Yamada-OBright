@@ -16,13 +16,18 @@ int calculate_brightness(float prop_val) {
     if (prop_val <= 222.0f) return 1;
     if (prop_val >= 8191.0f) return 4095;
     
-    // Linear interpolation: y = y_min + ((x - x_min) * (y_max - y_min)) / (x_max - x_min)
-    float mapped = 1.0f + ((prop_val - 222.0f) * 4094.0f) / 7969.0f;
+    // 1. Normalize the framework value (0.0 to 1.0)
+    float normalized = prop_val / 8191.0f;
     
-    // Using roundf from <math.h> (linked via -lm) for better precision
+    // 2. Reverse Android's gamma spline (approx ^3 curve) using a cube root
+    // This extracts the actual linear slider percentage (e.g., 1008 -> ~0.5)
+    float linear_percentage = cbrtf(normalized);
+    
+    // 3. Map the linear percentage to the 12-bit hardware scale
+    float mapped = linear_percentage * 4095.0f;
+    
     return (int)roundf(mapped);
 }
-
 // Hardware Write Function
 void write_backlight(int brightness_val) {
     FILE *f = fopen(BACKLIGHT_PATH, "w");
