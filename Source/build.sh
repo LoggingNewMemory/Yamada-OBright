@@ -8,9 +8,9 @@ NDK_ROOT=${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/28.2.13676358}
 API_LEVEL=30  # Android 11 (Safe baseline for modern ROMs)
 TARGET="aarch64-linux-android${API_LEVEL}"
 
-# Output Names
-BIN_NAME="vendor.yamada.oplus.display.adaptor-V1@3.0-service"
-RC_NAME="init.yamada.oplus.display.adaptor.rc"
+# Output Names (Updated to match Yamada OBright Diagram)
+BIN_NAME="yamada.obright-V1@3.0-service"
+RC_NAME="init.yamada.obright.rc"
 
 # Output Directories
 OUT_DIR="out"
@@ -61,8 +61,9 @@ fi
 
 # 3. Generate RC File
 echo "--- Generating Init Script ---"
+# Updated service name to match the OBright convention
 cat > "$ETC_DIR/$RC_NAME" <<EOF
-service vendor.yamada.display-adaptor /vendor/bin/hw/$BIN_NAME
+service yamada_obright /vendor/bin/hw/$BIN_NAME
     class hal
     user system
     group system graphics
@@ -78,10 +79,11 @@ on property:sys.boot_completed=1
     chmod 0600 /sys/class/leds/lcd-backlight/brightness
     
     # Start service
-    start vendor.yamada.display-adaptor
+    start yamada_obright
 EOF
 
 echo "✅ Created RC file: $ETC_DIR/$RC_NAME"
+
 # 4. Finalize
 echo "--- Done ---"
 echo "Files are ready in '$OUT_DIR/vendor/'"
