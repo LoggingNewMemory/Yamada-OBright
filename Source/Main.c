@@ -12,6 +12,14 @@
 
 // Translation Logic based on Yamada Blueprint
 int calculate_brightness(float prop_val) {
+    // --- Settings Slider Fix (Float Mode) ---
+    // If the framework writes a 0.0 to 1.0 float (from the Settings app),
+    // scale it up to the framework integer range (222 to 8191) first.
+    if (prop_val > 0.0f && prop_val <= 1.0f) {
+        prop_val = 222.0f + (prop_val * (8191.0f - 222.0f));
+    }
+    // ----------------------------------------
+
     // Hardware constraints
     if (prop_val <= 222.0f) return 1;
     if (prop_val >= 8191.0f) return 4095;
