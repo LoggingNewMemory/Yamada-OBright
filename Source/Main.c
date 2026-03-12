@@ -73,6 +73,14 @@ int main() {
             // Safely read the new value
             __system_property_read_callback(pi, read_prop_callback, &current_prop_val);
 
+            // --- OS16 Dim Record Patch ---
+            // If the framework abruptly reports 0.0, ignore it to prevent screen recorder dimming
+            if (current_prop_val == 0.0f) {
+                __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "Brightness reported to be 0? ignoring and keeping previous value.");
+                continue; 
+            }
+            // -----------------------------
+
             // Translate and push to hardware
             int new_brightness = calculate_brightness(current_prop_val);
             write_backlight(new_brightness);
