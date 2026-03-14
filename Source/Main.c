@@ -9,6 +9,8 @@
 
 #define PROP_NAME "debug.tracing.screen_brightness"
 #define STATE_PROP "debug.tracing.screen_state"
+#define SYS_PROP_MAX "sys.oplus.multibrightness"
+#define SYS_PROP_MIN "sys.oplus.multibrightness.min"
 #define BACKLIGHT_PATH "/sys/class/leds/lcd-backlight/brightness"
 #define MAX_BRIGHT_PATH "/sys/class/leds/lcd-backlight/max_hw_brightness"
 #define MIN_BRIGHT_PATH "/sys/class/leds/lcd-backlight/min_brightness"
@@ -43,6 +45,14 @@ float get_float_prop(const char* prop_name, float default_val) {
     return default_val;
 }
 
+int get_int_prop(const char* prop_name, int default_val) {
+    char value[PROP_VALUE_MAX];
+    if (__system_property_get(prop_name, value) > 0) {
+        return atoi(value);
+    }
+    return default_val;
+}
+
 int get_screen_state() {
     char value[PROP_VALUE_MAX];
     if (__system_property_get(STATE_PROP, value) > 0) {
@@ -52,15 +62,19 @@ int get_screen_state() {
 }
 
 // --- Math Translation ---
-int calculate_brightness(float prop_val, int hw_min, int hw_max) {
+int calculate_brightness(float prop_val, int hw_min, int hw_max, int input_min, int input_max) {
+    float f_input_min = (float)input_min;
+    float f_input_max = (float)input_max;
+
+    // Handle float percentages (0.0 to 1.0) scaling to the dynamic input range
     if (prop_val > 0.0f && prop_val <= 1.0f) {
-        prop_val = 222.0f + (prop_val * (8191.0f - 222.0f));
+        prop_val = f_input_min + (prop_val * (f_input_max - f_input_min));
     }
 
-    if (prop_val <= 222.0f) return hw_min;
-    if (prop_val >= 8191.0f) return hw_max;
+    if (prop_val <= f_input_min) return hw_min;
+    if (prop_val >= f_input_max) return hw_max;
     
-    float normalized = prop_val / 8191.0f;
+    float normalized = prop_val / f_input_max;
     float linear_percentage = cbrtf(normalized);
     float mapped = linear_percentage * (float)hw_max;
     
@@ -74,8 +88,8 @@ int calculate_brightness(float prop_val, int hw_min, int hw_max) {
 int main() {
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "Starting Yamada OPlus Display Adaptor (Anti-Cache Edition)...");
 
-    int hw_max = read_int_from_file(MAX_BRIGHT_PATH, 4095); //
-    int hw_min = read_int_from_file(MIN_BRIGHT_PATH, 1);    //
+    int hw_max = read_int_from_file(MAX_BRIGHT_PATH, 4095);
+    int hw_min = read_int_from_file(MIN_BRIGHT_PATH, 1);    
     
     uint32_t global_serial = 0;
     struct timespec no_wait = {0, 0};
@@ -84,7 +98,11 @@ int main() {
     float current_prop_val = get_float_prop(PROP_NAME, 0.0f);
     int prev_state = get_screen_state();
     
-    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max);
+    // Initial fetch of input properties
+    int input_max = get_int_prop(SYS_PROP_MAX, 8191);
+    int input_min = get_int_prop(SYS_PROP_MIN, 222);
+
+    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, input_min, input_max);
     int prev_bright = (raw_initial == -1) ? hw_min : raw_initial;
     int last_written_val = -1;
     
@@ -116,8 +134,12 @@ int main() {
         // 2. Read Fresh Data
         float new_prop_val = get_float_prop(PROP_NAME, current_prop_val);
         int cur_state = get_screen_state();
+        
+        // Refresh input properties dynamically
+        input_max = get_int_prop(SYS_PROP_MAX, 8191);
+        input_min = get_int_prop(SYS_PROP_MIN, 222);
 
-        int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max);
+        int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, input_min, input_max);
         int cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
         if (cur_bright == -1) cur_bright = hw_min;
 
