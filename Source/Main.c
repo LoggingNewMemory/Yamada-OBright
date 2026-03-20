@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdbool.h>
 #include <time.h>
@@ -28,12 +29,11 @@ int read_int_from_file(const char* path, int default_val) {
     return val;
 }
 
-void write_backlight(int brightness_val) {
-    FILE *f = fopen(BACKLIGHT_PATH, "w");
-    if (f != NULL) {
-        fprintf(f, "%d\n", brightness_val);
-        fclose(f);
-    }
+void write_backlight_fd(int fd, int brightness_val) {
+    if (fd < 0) return;
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%d\n", brightness_val);
+    pwrite(fd, buf, len, 0);
 }
 
 // --- Property Reading Helpers ---
@@ -66,7 +66,6 @@ int calculate_brightness(float prop_val, int hw_min, int hw_max, int input_min, 
     float f_input_min = (float)input_min;
     float f_input_max = (float)input_max;
 
-    // Handle float percentages (0.0 to 1.0) scaling to the dynamic input range
     if (prop_val > 0.0f && prop_val <= 1.0f) {
         prop_val = f_input_min + (prop_val * (f_input_max - f_input_min));
     }
@@ -74,11 +73,9 @@ int calculate_brightness(float prop_val, int hw_min, int hw_max, int input_min, 
     if (prop_val <= f_input_min) return hw_min;
     if (prop_val >= f_input_max) return hw_max;
     
-    float normalized = prop_val / f_input_max;
-    float linear_percentage = cbrtf(normalized);
-    float mapped = linear_percentage * (float)hw_max;
+    float linear_percentage = cbrtf(prop_val / f_input_max);
+    int result = (int)roundf(linear_percentage * (float)hw_max);
     
-    int result = (int)roundf(mapped);
     if (result < hw_min) return hw_min;
     if (result > hw_max) return hw_max;
     return result;
@@ -91,6 +88,18 @@ int main() {
     int hw_max = read_int_from_file(MAX_BRIGHT_PATH, 4095);
     int hw_min = read_int_from_file(MIN_BRIGHT_PATH, 1);    
     
+    // [BUG FIX]: Hard-cap the physical minimum brightness to 100.
+    // This prevents the screen from becoming unreadably dim and stops the panel 
+    // from fully shutting off the backlight (black screen) at minimum values.
+    if (hw_min < 100) {
+        hw_min = 100;
+    }
+    
+    int backlight_fd = open(BACKLIGHT_PATH, O_WRONLY);
+    if (backlight_fd < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Failed to open backlight path!");
+    }
+
     uint32_t global_serial = 0;
     struct timespec no_wait = {0, 0};
     __system_property_wait(NULL, 0, &global_serial, &no_wait); 
@@ -98,22 +107,24 @@ int main() {
     float current_prop_val = get_float_prop(PROP_NAME, 0.0f);
     int prev_state = get_screen_state();
     
-    // Initial fetch of input properties
     int input_max = get_int_prop(SYS_PROP_MAX, 8191);
     int input_min = get_int_prop(SYS_PROP_MIN, 222);
 
     int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, input_min, input_max);
     int prev_bright = (raw_initial == -1) ? hw_min : raw_initial;
-    int last_written_val = -1;
     
-    int wake_ticks = 0; // Tracks our wake verification window
+    // Safety net: ensure even initialization respects the new 100 floor
+    if (prev_bright < hw_min) prev_bright = hw_min; 
+    
+    int last_written_val = -1;
+    int wake_ticks = 0;
 
     if (prev_state != 2) {
         last_written_val = 0;
-        write_backlight(0);
+        write_backlight_fd(backlight_fd, 0);
     } else {
         last_written_val = prev_bright;
-        write_backlight(prev_bright);
+        write_backlight_fd(backlight_fd, prev_bright);
     }
 
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "Entering Smart Timeout Event Loop.");
@@ -123,55 +134,57 @@ int main() {
 
         // 1. Smart Waiting
         if (wake_ticks > 0) {
-            // Screen is waking up. Wait up to 50ms for a property change.
             struct timespec timeout = {0, 50000000}; // 50ms
             __system_property_wait(NULL, old_serial, &global_serial, &timeout);
         } else {
-            // Screen is stable. Block at 0% CPU until a property changes.
             __system_property_wait(NULL, old_serial, &global_serial, NULL);
         }
 
-        // 2. Read Fresh Data
-        float new_prop_val = get_float_prop(PROP_NAME, current_prop_val);
-        int cur_state = get_screen_state();
+        bool props_changed = (global_serial != old_serial);
         
-        // Refresh input properties dynamically
-        input_max = get_int_prop(SYS_PROP_MAX, 8191);
-        input_min = get_int_prop(SYS_PROP_MIN, 222);
+        float new_prop_val = current_prop_val;
+        int cur_state = prev_state;
+        int cur_bright = prev_bright;
 
-        int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, input_min, input_max);
-        int cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
-        if (cur_bright == -1) cur_bright = hw_min;
+        if (props_changed) {
+            // 2. Read Fresh Data
+            new_prop_val = get_float_prop(PROP_NAME, current_prop_val);
+            cur_state = get_screen_state();
+            input_max = get_int_prop(SYS_PROP_MAX, input_max);
+            input_min = get_int_prop(SYS_PROP_MIN, input_min);
+
+            int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, input_min, input_max);
+            cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
+            
+            // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min (100) when ON.
+            if (cur_bright < hw_min) cur_bright = hw_min; 
+        }
 
         // 3. State Change Detection
         if (cur_state != prev_state) {
             if (cur_state == 2) {
-                // Start a 750ms verification window (15 ticks * 50ms) for slow CPUs
                 wake_ticks = 15; 
             } else {
-                // Instantly cancel verification if the user rapidly turns the screen off
                 wake_ticks = 0;  
             }
         }
 
         // 4. Calculate Final Value
+        // Note: It is still safe (and necessary) to write 0 when cur_state != 2 (Screen OFF)
         int val_to_write = (cur_state != 2) ? 0 : cur_bright;
 
         // 5. Execution Logic
         if (val_to_write != last_written_val) {
-            // Standard write when target changes
-            write_backlight(val_to_write);
+            write_backlight_fd(backlight_fd, val_to_write);
             last_written_val = val_to_write;
             
-        } else if (wake_ticks > 0 && cur_state == 2 && global_serial == old_serial) {
-            // The Anti-Cache Wobble:
-            // We are in the wake window, the target hasn't changed, and the 50ms timeout hit.
-            // Force the kernel to bypass its cache and update the physical hardware.
+        } else if (wake_ticks > 0 && cur_state == 2 && !props_changed) {
+            // The Anti-Cache Wobble
             wake_ticks--;
             int wobble = (val_to_write > hw_min) ? val_to_write - 1 : val_to_write + 1;
             
-            write_backlight(wobble);       // Hardware receives modified value
-            write_backlight(val_to_write); // Hardware instantly receives correct value
+            write_backlight_fd(backlight_fd, wobble);
+            write_backlight_fd(backlight_fd, val_to_write);
         }
 
         prev_bright = cur_bright;
@@ -179,5 +192,6 @@ int main() {
         current_prop_val = new_prop_val;
     }
 
+    if (backlight_fd >= 0) close(backlight_fd); 
     return 0;
 }
