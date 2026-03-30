@@ -10,12 +10,14 @@
 
 #define PROP_NAME "debug.tracing.screen_brightness"
 #define STATE_PROP "debug.tracing.screen_state"
-#define SYS_PROP_MAX "sys.oplus.multibrightness"
-#define SYS_PROP_MIN "sys.oplus.multibrightness.min"
 #define BACKLIGHT_PATH "/sys/class/leds/lcd-backlight/brightness"
 #define MAX_BRIGHT_PATH "/sys/class/leds/lcd-backlight/max_hw_brightness"
 #define MIN_BRIGHT_PATH "/sys/class/leds/lcd-backlight/min_brightness"
 #define LOG_TAG "YamadaOBright"
+
+// --- Hardcoded Input Bounds ---
+#define INPUT_MAX 8191
+#define INPUT_MIN 222
 
 // --- File Reading Helpers ---
 int read_int_from_file(const char* path, int default_val) {
@@ -41,14 +43,6 @@ float get_float_prop(const char* prop_name, float default_val) {
     char value[PROP_VALUE_MAX];
     if (__system_property_get(prop_name, value) > 0) {
         return atof(value);
-    }
-    return default_val;
-}
-
-int get_int_prop(const char* prop_name, int default_val) {
-    char value[PROP_VALUE_MAX];
-    if (__system_property_get(prop_name, value) > 0) {
-        return atoi(value);
     }
     return default_val;
 }
@@ -107,10 +101,8 @@ int main() {
     float current_prop_val = get_float_prop(PROP_NAME, 0.0f);
     int prev_state = get_screen_state();
     
-    int input_max = get_int_prop(SYS_PROP_MAX, 8191);
-    int input_min = get_int_prop(SYS_PROP_MIN, 222);
-
-    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, input_min, input_max);
+    // Calculate initial brightness using the hardcoded INPUT_MIN and INPUT_MAX
+    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
     int prev_bright = (raw_initial == -1) ? hw_min : raw_initial;
     
     // Safety net: ensure even initialization respects the new 100 floor
@@ -150,10 +142,9 @@ int main() {
             // 2. Read Fresh Data
             new_prop_val = get_float_prop(PROP_NAME, current_prop_val);
             cur_state = get_screen_state();
-            input_max = get_int_prop(SYS_PROP_MAX, input_max);
-            input_min = get_int_prop(SYS_PROP_MIN, input_min);
 
-            int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, input_min, input_max);
+            // Calculate new brightness using the hardcoded bounds
+            int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
             cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
             
             // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min (100) when ON.
