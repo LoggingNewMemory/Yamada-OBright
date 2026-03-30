@@ -82,11 +82,11 @@ int main() {
     int hw_max = read_int_from_file(MAX_BRIGHT_PATH, 4095);
     int hw_min = read_int_from_file(MIN_BRIGHT_PATH, 1);    
     
-    // [BUG FIX]: Hard-cap the physical minimum brightness to 100.
+    // [BUG FIX]: Hard-cap the physical minimum brightness to 1000.
     // This prevents the screen from becoming unreadably dim and stops the panel 
     // from fully shutting off the backlight (black screen) at minimum values.
-    if (hw_min < 100) {
-        hw_min = 100;
+    if (hw_min < 1000) {
+        hw_min = 1000;
     }
     
     int backlight_fd = open(BACKLIGHT_PATH, O_WRONLY);
@@ -105,7 +105,7 @@ int main() {
     int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
     int prev_bright = (raw_initial == -1) ? hw_min : raw_initial;
     
-    // Safety net: ensure even initialization respects the new 100 floor
+    // Safety net: ensure even initialization respects the new 1000 floor
     if (prev_bright < hw_min) prev_bright = hw_min; 
     
     int last_written_val = -1;
@@ -147,7 +147,7 @@ int main() {
             int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
             cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
             
-            // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min (100) when ON.
+            // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min (1000) when ON.
             if (cur_bright < hw_min) cur_bright = hw_min; 
         }
 
