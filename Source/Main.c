@@ -15,9 +15,9 @@
 #define MIN_BRIGHT_PATH "/sys/class/leds/lcd-backlight/min_brightness"
 #define LOG_TAG "YamadaOBright"
 
-// --- Hardcoded Input Bounds ---
-#define INPUT_MAX 8191
-#define INPUT_MIN 222
+// --- Input Bounds ---
+// These will now be read dynamically from system properties.
+
 
 // --- File Reading Helpers ---
 int read_int_from_file(const char* path, int default_val) {
@@ -60,18 +60,20 @@ int calculate_brightness(float prop_val, int hw_min, int hw_max, int input_min, 
     float f_input_min = (float)input_min;
     float f_input_max = (float)input_max;
 
-    if (prop_val > 0.0f && prop_val <= 1.0f) {
-        prop_val = f_input_min + (prop_val * (f_input_max - f_input_min));
-    }
+    // Constrain prop_val to bounds
+    if (prop_val < f_input_min) prop_val = f_input_min;
+    if (prop_val > f_input_max) prop_val = f_input_max;
 
-    if (prop_val <= f_input_min) return hw_min;
-    if (prop_val >= f_input_max) return hw_max;
+    // Normalize input to a 0.0 - 1.0 range based on the dynamic bounds
+    float normalized_input = (prop_val - f_input_min) / (f_input_max - f_input_min);
+
+    // Apply standard human eye brightness perception curve (gamma 2.2)
+    // The previous cbrtf (cube root) was making it drastically too bright at low levels!
+    float curved = powf(normalized_input, 2.2f);
+
+    // Map the curved percentage to the physical hardware bounds
+    int result = hw_min + (int)roundf(curved * (float)(hw_max - hw_min));
     
-    float linear_percentage = cbrtf(prop_val / f_input_max);
-    int result = (int)roundf(linear_percentage * (float)hw_max);
-    
-    if (result < hw_min) return hw_min;
-    if (result > hw_max) return hw_max;
     return result;
 }
 
@@ -81,12 +83,14 @@ int main() {
 
     int hw_max = read_int_from_file(MAX_BRIGHT_PATH, 4095);
     int hw_min = read_int_from_file(MIN_BRIGHT_PATH, 1);    
-    
-    // [BUG FIX]: Hard-cap the physical minimum brightness to 1000.
-    // This prevents the screen from becoming unreadably dim and stops the panel 
-    // from fully shutting off the backlight (black screen) at minimum values.
-    if (hw_min < 1000) {
-        hw_min = 1000;
+    int input_max = (int)get_float_prop("sys.oplus.multibrightness", 8191.0f);
+    int input_min = (int)get_float_prop("sys.oplus.multibrightness.min", 222.0f);
+
+    // [BUG FIX]: As requested, use exactly 100 + min_brightness for the physical floor.
+    // This gives a controlled, very dim low end without blacking out.
+    int safe_hw_min = 100 + hw_min;
+    if (hw_min < safe_hw_min) {
+        hw_min = safe_hw_min;
     }
     
     int backlight_fd = open(BACKLIGHT_PATH, O_WRONLY);
@@ -101,11 +105,11 @@ int main() {
     float current_prop_val = get_float_prop(PROP_NAME, 0.0f);
     int prev_state = get_screen_state();
     
-    // Calculate initial brightness using the hardcoded INPUT_MIN and INPUT_MAX
-    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
+    // Calculate initial brightness using the dynamic bounds
+    int raw_initial = (current_prop_val == 0.0f) ? -1 : calculate_brightness(current_prop_val, hw_min, hw_max, input_min, input_max);
     int prev_bright = (raw_initial == -1) ? hw_min : raw_initial;
     
-    // Safety net: ensure even initialization respects the new 1000 floor
+    // Safety net: ensure even initialization respects the dynamic floor
     if (prev_bright < hw_min) prev_bright = hw_min; 
     
     int last_written_val = -1;
@@ -143,11 +147,11 @@ int main() {
             new_prop_val = get_float_prop(PROP_NAME, current_prop_val);
             cur_state = get_screen_state();
 
-            // Calculate new brightness using the hardcoded bounds
-            int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, INPUT_MIN, INPUT_MAX);
+            // Calculate new brightness using the dynamic bounds
+            int raw_bright = (new_prop_val == 0.0f) ? -1 : calculate_brightness(new_prop_val, hw_min, hw_max, input_min, input_max);
             cur_bright = (raw_bright == -1) ? prev_bright : raw_bright;
             
-            // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min (1000) when ON.
+            // [BUG FIX]: Absolute safety check. Nothing evaluates below hw_min when ON.
             if (cur_bright < hw_min) cur_bright = hw_min; 
         }
 
