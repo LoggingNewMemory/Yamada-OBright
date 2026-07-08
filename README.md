@@ -9,7 +9,7 @@ How to use? Add to vendor and add the fs context Like this:
 ```
 
 Note:
-remove props containing: vrr, brightness, silky, underscreen on my_product (and so on)
+- Remove props containing: vrr, brightness, silky, underscreen on my_product (and so on)
 
 Support Me: <br />
 https://sociabuzz.com/kanagawa_yamada/tribe (Global) <br />
