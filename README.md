@@ -1,6 +1,6 @@
 Inspired By @ryanistr OPlus-Brightness-Adaptor-For-Transsion
 
-Why? This one specially made for my device (TECNO LH8n) that still have brightness sudden dim. It may work on other IPS display
+Why? This one specially made for my device (TECNO LH8n). It may work on other IPS display
 
 How to use? Add to vendor and add the fs context Like this: 
 
