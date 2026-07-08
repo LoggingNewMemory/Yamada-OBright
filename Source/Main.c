@@ -165,8 +165,14 @@ int main() {
         }
 
         // 4. Calculate Final Value
-        // Allow brightness for ON (2), DOZE (3), and DOZE_SUSPEND (4). Only write 0 if OFF (1 or 0).
-        int val_to_write = (cur_state == 1 || cur_state == 0) ? 0 : cur_bright;
+        int val_to_write = 0;
+        if (cur_state == 1 || cur_state == 0) {
+            val_to_write = 0;
+        } else if (cur_state == 3 || cur_state == 4) {
+            val_to_write = (cur_bright < 400) ? 400 : cur_bright; // Force AOD visibility
+        } else {
+            val_to_write = cur_bright;
+        }
 
         // 5. Execution Logic
         if (val_to_write != last_written_val) {
