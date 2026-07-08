@@ -115,7 +115,7 @@ int main() {
     int last_written_val = -1;
     int wake_ticks = 0;
 
-    if (prev_state != 2) {
+    if (prev_state == 1 || prev_state == 0) {
         last_written_val = 0;
         write_backlight_fd(backlight_fd, 0);
     } else {
@@ -157,7 +157,7 @@ int main() {
 
         // 3. State Change Detection
         if (cur_state != prev_state) {
-            if (cur_state == 2) {
+            if (cur_state == 2 || cur_state == 3 || cur_state == 4) {
                 wake_ticks = 15; 
             } else {
                 wake_ticks = 0;  
@@ -165,15 +165,15 @@ int main() {
         }
 
         // 4. Calculate Final Value
-        // Note: It is still safe (and necessary) to write 0 when cur_state != 2 (Screen OFF)
-        int val_to_write = (cur_state != 2) ? 0 : cur_bright;
+        // Allow brightness for ON (2), DOZE (3), and DOZE_SUSPEND (4). Only write 0 if OFF (1 or 0).
+        int val_to_write = (cur_state == 1 || cur_state == 0) ? 0 : cur_bright;
 
         // 5. Execution Logic
         if (val_to_write != last_written_val) {
             write_backlight_fd(backlight_fd, val_to_write);
             last_written_val = val_to_write;
             
-        } else if (wake_ticks > 0 && cur_state == 2 && !props_changed) {
+        } else if (wake_ticks > 0 && (cur_state == 2 || cur_state == 3 || cur_state == 4) && !props_changed) {
             // The Anti-Cache Wobble
             wake_ticks--;
             int wobble = (val_to_write > hw_min) ? val_to_write - 1 : val_to_write + 1;
